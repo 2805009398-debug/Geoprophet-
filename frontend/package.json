@@ -1,0 +1,31 @@
+{
+  "name": "geoprophet-web-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.12.2",
+    "dayjs": "^1.11.18",
+    "echarts": "^6.0.0",
+    "element-plus": "^2.11.4",
+    "leaflet": "^1.9.4",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.22",
+    "vue-echarts": "^8.0.1",
+    "vue-router": "^4.6.3"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vue-tsc": "^3.1.1"
+  }
+}
+

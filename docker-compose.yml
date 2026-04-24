@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: geoprophet-api
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      JWT_SECRET: geoprophet-demo-secret
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/uploads:/app/backend/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: geoprophet-web
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+

@@ -1,0 +1,9 @@
+node_modules
+.tools
+dist
+.DS_Store
+backend/data/*.db
+backend/uploads/*
+!backend/uploads/.gitkeep
+frontend/dist
+npm-debug.log*
