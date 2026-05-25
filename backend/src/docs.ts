@@ -50,7 +50,9 @@ export const apiCatalog = {
     '/api/uploads': { post: { summary: '上传图片附件' } },
     '/api/analysis/models': { get: { summary: '算法模型库' } },
     '/api/analysis/assessments': { get: { summary: '灾情影响评估结果' } },
+    '/api/analysis/runs': { get: { summary: '最近识别任务记录' } },
+    '/api/analysis/landslide': { post: { summary: '滑坡图片识别与区域标注' } },
+    '/api/analysis/glacier': { post: { summary: 'InSAR 冰川识别与变化区域标注' } },
     '/api/plans': { get: { summary: '应急处置预案列表' } }
   }
 };
-

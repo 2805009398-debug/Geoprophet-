@@ -29,6 +29,14 @@
 
 - `GET /api/analysis/models`
 - `GET /api/analysis/assessments`
+- `GET /api/analysis/runs`
+- `POST /api/analysis/landslide`
+- `POST /api/analysis/glacier`
 - `GET /api/plans`
 - `GET /api/requirements`
 
+## 模型服务
+
+- `GET /health`
+- `POST /predict/landslide`
+- `POST /predict/glacier`

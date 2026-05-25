@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS assessments (
   FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS analysis_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_type TEXT NOT NULL,
+  source_name TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  confidence_score REAL NOT NULL,
+  summary TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS emergency_plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL UNIQUE,
@@ -200,7 +213,8 @@ INSERT OR IGNORE INTO analysis_models (id, name, category, version, accuracy, st
   (1, 'LandslideVision', '滑坡识别', 'v2.1.0', 0.93, 'stable', '2026-04-23 08:00:00', '融合裂缝图像与坡面纹理特征，支持群众图片 AI 初审。'),
   (2, 'DebrisFlow Sentinel', '泥石流预警', 'v1.8.4', 0.91, 'stable', '2026-04-23 07:45:00', '结合雨量、泥位和地形参数进行触发概率预测。'),
   (3, 'Subsidence Prophet', '沉陷分析', 'v1.4.2', 0.88, 'training', '2026-04-22 18:10:00', '使用时序沉降数据和地下水位数据进行趋势外推。'),
-  (4, 'Multi-source Fusion Engine', '多源融合', 'v3.0.1', 0.95, 'stable', '2026-04-23 06:30:00', '整合遥感、视频、传感器和群众上报数据，生成统一态势底板。');
+  (4, 'Multi-source Fusion Engine', '多源融合', 'v3.0.1', 0.95, 'stable', '2026-04-23 06:30:00', '整合遥感、视频、传感器和群众上报数据，生成统一态势底板。'),
+  (5, 'GlacierSAR-Net', '冰川识别', 'v1.0.0', 0.89, 'stable', '2026-04-23 05:40:00', '面向 InSAR 幅值/相位输入的冰川边界识别与变化敏感区分割模型。');
 
 INSERT OR IGNORE INTO assessments (id, site_id, level, population_affected, economic_loss, road_impact, summary, created_at) VALUES
   (1, 1, '重大', 126, 380.0, '影响乡道 X214 半幅通行', '若持续降雨，可能影响居民点 38 户及下方乡道。', '2026-04-23 08:40:00'),
@@ -224,4 +238,3 @@ INSERT OR IGNORE INTO system_logs (id, category, level, message, created_at) VAL
   (8, 'report', 'info', '群众上报“居民区后山出现新裂缝”进入待审核队列。', '2026-04-23 08:06:00'),
   (9, 'security', 'info', '管理员 admin 成功登录系统。', '2026-04-23 08:50:00'),
   (10, 'report', 'warning', '花园口地裂缝带群众上报已超过常规周均值。', '2026-04-21 15:30:00');
-

@@ -190,3 +190,46 @@ export interface RequirementItem {
   implemented: string[];
 }
 
+export interface PredictionPoint {
+  x: number;
+  y: number;
+}
+
+export interface PredictionRegion {
+  label: string;
+  score: number;
+  polygon: PredictionPoint[];
+}
+
+export interface HazardPrediction {
+  id: number;
+  taskType: 'landslide' | 'glacier';
+  provider: 'mock' | 'external-http';
+  modelName: string;
+  sourceName: string;
+  sourceUrl: string;
+  createdAt: string;
+  summary: string;
+  confidence: number;
+  classification?: {
+    hasHazard: boolean;
+    label: string;
+    confidence: number;
+  };
+  segmentation: {
+    regions: PredictionRegion[];
+  };
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface AnalysisRunItem {
+  id: number;
+  taskType: 'landslide' | 'glacier';
+  sourceName: string;
+  sourceUrl: string;
+  provider: 'mock' | 'external-http';
+  modelName: string;
+  confidence: number;
+  summary: string;
+  createdAt: string;
+}

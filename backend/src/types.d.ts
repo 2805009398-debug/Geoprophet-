@@ -8,13 +8,16 @@ declare module 'fastify' {
     appConfig: {
       port: number;
       host: string;
-      jwtSecret: string;
-      oidcEnabled: boolean;
-      oidcIssuer?: string;
-      oidcClientId?: string;
-      oidcRedirectUri?: string;
-    };
-  }
+    jwtSecret: string;
+    oidcEnabled: boolean;
+    oidcIssuer?: string;
+    oidcClientId?: string;
+    oidcRedirectUri?: string;
+    aiInferenceBaseUrl?: string;
+    aiLandslideEndpoint: string;
+    aiGlacierEndpoint: string;
+  };
+}
 }
 
 declare module '@fastify/jwt' {
@@ -33,4 +36,3 @@ declare module '@fastify/jwt' {
     };
   }
 }
-

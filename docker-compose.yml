@@ -1,13 +1,29 @@
 services:
+  model-service:
+    build:
+      context: .
+      dockerfile: model-service/Dockerfile
+    container_name: geoprophet-model-service
+    environment:
+      MODEL_DEVICE: cpu
+      ALLOW_HEURISTIC_FALLBACK: "true"
+    volumes:
+      - ./model-service/models:/app/model-service/models
+    ports:
+      - "8000:8000"
+
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: geoprophet-api
+    depends_on:
+      - model-service
     environment:
       PORT: 3000
       HOST: 0.0.0.0
       JWT_SECRET: geoprophet-demo-secret
+      AI_INFERENCE_BASE_URL: http://model-service:8000
     ports:
       - "3000:3000"
     volumes:
@@ -23,4 +39,3 @@ services:
       - api
     ports:
       - "8080:80"
-

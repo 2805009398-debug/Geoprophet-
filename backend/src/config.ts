@@ -6,7 +6,8 @@ export const runtimePaths = {
   appRoot,
   dbPath: path.join(appRoot, 'data', 'geoprophet.db'),
   initSqlPath: path.join(appRoot, 'db', 'init.sql'),
-  uploadsDir: path.join(appRoot, 'uploads')
+  uploadsDir: path.join(appRoot, 'uploads'),
+  analysisUploadsDir: path.join(appRoot, 'uploads', 'analysis')
 };
 
 export const appConfig = {
@@ -16,6 +17,8 @@ export const appConfig = {
   oidcEnabled: Boolean(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID),
   oidcIssuer: process.env.OIDC_ISSUER,
   oidcClientId: process.env.OIDC_CLIENT_ID,
-  oidcRedirectUri: process.env.OIDC_REDIRECT_URI
+  oidcRedirectUri: process.env.OIDC_REDIRECT_URI,
+  aiInferenceBaseUrl: process.env.AI_INFERENCE_BASE_URL,
+  aiLandslideEndpoint: process.env.AI_LANDSLIDE_ENDPOINT ?? '/predict/landslide',
+  aiGlacierEndpoint: process.env.AI_GLACIER_ENDPOINT ?? '/predict/glacier'
 };
-
