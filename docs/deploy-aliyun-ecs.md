@@ -70,14 +70,28 @@ cp .env.production.example .env.production
 编辑 `.env.production`：
 
 ```dotenv
+APP_MODE=production
 JWT_SECRET=替换成至少32位的随机字符串
 WEB_PORT=80
 APP_DOMAIN=your-domain.com
+CORS_ORIGINS=https://your-domain.com
+TRUST_PROXY=true
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=替换成强密码
+INITIAL_ADMIN_DISPLAY_NAME=系统管理员
+AI_INFERENCE_BASE_URL=http://model-service:8000
+ALLOW_HEURISTIC_FALLBACK=false
 ```
 
 说明：
 
-- `JWT_SECRET` 必须修改，不能继续使用演示密钥。
+- `JWT_SECRET` 必须修改，不能继续使用演示密钥或模板占位值。
+- `CORS_ORIGINS` 生产模式必填；如果先用公网 IP 访问，就填 `http://ECS公网IP`，域名和 HTTPS 启用后改为 `https://your-domain.com`。
+- `TRUST_PROXY=true` 用于 Docker/Caddy/Nginx 反代部署，让审计日志和限流读取真实客户端 IP。
+- `INITIAL_ADMIN_PASSWORD` 只用于空用户库首次创建管理员，不能使用 `admin123` 等演示密码。
+- `AI_INFERENCE_BASE_URL` 生产模式必填，禁止正式环境静默使用 mock AI。
+- `ALLOW_HEURISTIC_FALLBACK=false` 生产建议保持关闭；模型权重缺失时应暴露故障，而不是返回演示推理。
+- 如果已有数据库来自 demo 环境，生产启动会拒绝仍保留默认演示密码的账号；上线前必须修改或删除这些账号。
 - 如果你暂时没有域名，`APP_DOMAIN` 可以先随便填，但不要使用 HTTPS 方案启动。
 
 ## 启动方式
@@ -160,7 +174,7 @@ docker compose --env-file .env.production -f docker-compose.https.yml up -d --bu
 ## 上线后检查项
 
 - 打开首页能正常加载图表与列表
-- 使用 `admin / admin123` 能正常登录
+- 使用 `.env.production` 中配置的初始管理员能正常登录
 - 群众上报图片上传正常
 - `backend/data` 和 `backend/uploads` 在宿主机上持续存在
 - 服务器重启后容器可自动拉起

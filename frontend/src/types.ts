@@ -153,6 +153,14 @@ export interface ReportItem {
   status: string;
   createdAt: string;
   siteName?: string | null;
+  aiAnalysisRunId?: number | null;
+  aiProvider?: string | null;
+  aiModelName?: string | null;
+  aiRiskLevel?: RiskAssessment['riskLevel'] | null;
+  aiRiskLabel?: string | null;
+  aiSummary?: string | null;
+  aiRecommendedAction?: string | null;
+  aiReviewRequired?: boolean;
 }
 
 export interface ModelItem {
@@ -166,28 +174,12 @@ export interface ModelItem {
   summary: string;
 }
 
-export interface PlanItem {
-  id: number;
-  title: string;
-  level: string;
-  status: string;
-  leader: string;
-  summary: string;
-  resourceSummary: string;
-  updatedAt: string;
-}
-
 export interface SystemLog {
   id: number;
   category: string;
   level: string;
   message: string;
   createdAt: string;
-}
-
-export interface RequirementItem {
-  area: string;
-  implemented: string[];
 }
 
 export interface PredictionPoint {
@@ -201,16 +193,27 @@ export interface PredictionRegion {
   polygon: PredictionPoint[];
 }
 
+export interface RiskAssessment {
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  riskScore: number;
+  label: string;
+  evidence: string[];
+  recommendedAction: string;
+  reviewRequired: boolean;
+  basis: string;
+}
+
 export interface HazardPrediction {
   id: number;
-  taskType: 'landslide' | 'glacier';
-  provider: 'mock' | 'external-http';
+  taskType: 'landslide';
+  provider: 'mock' | 'external-http' | 'vision-llm';
   modelName: string;
   sourceName: string;
   sourceUrl: string;
   createdAt: string;
   summary: string;
   confidence: number;
+  riskAssessment: RiskAssessment;
   classification?: {
     hasHazard: boolean;
     label: string;
@@ -222,14 +225,357 @@ export interface HazardPrediction {
   metadata: Record<string, string | number | boolean | null>;
 }
 
+export interface ReportImageUploadResponse {
+  url: string;
+  aiAnalysisRunId?: number;
+  analysis: HazardPrediction;
+}
+
 export interface AnalysisRunItem {
   id: number;
-  taskType: 'landslide' | 'glacier';
+  taskType: 'landslide';
   sourceName: string;
   sourceUrl: string;
-  provider: 'mock' | 'external-http';
+  provider: 'mock' | 'external-http' | 'vision-llm';
   modelName: string;
   confidence: number;
   summary: string;
   createdAt: string;
+}
+
+export interface VisionConfig {
+  provider: 'disabled' | 'doubao' | 'openai-compatible' | 'deepseek';
+  enabled: boolean;
+  configured: boolean;
+  model: string | null;
+  baseUrl: string | null;
+  timeoutMs: number;
+}
+
+export interface GeohazardLayerMeta {
+  id: string;
+  title: string;
+  source: string;
+  theme: string;
+  region: string;
+  geometryType: 'point' | 'polygon';
+  path: string;
+  color: string;
+  description: string;
+  available: boolean;
+  recordCount: number;
+  bytes: number;
+}
+
+export interface GeohazardOverview {
+  summary: {
+    fileCount: number;
+    recordCount: number;
+    vectorRecordCount: number;
+    totalBytes: number;
+    totalSizeMb: number;
+    vectorLayerCount: number;
+    rasterFileCount: number;
+  };
+  groups: Array<{
+    name: string;
+    fileCount: number;
+    totalBytes: number;
+    totalSizeMb: number;
+  }>;
+  layers: GeohazardLayerMeta[];
+  catalog: Array<Record<string, string>>;
+  regions: Array<{
+    id: string;
+    name: string;
+    bbox: number[];
+    description: string;
+  }>;
+  landsatScenes: Array<{
+    path: string;
+    sceneId: string;
+    bytes: number;
+  }>;
+  gatedProducts: Array<{
+    name: string;
+    reason: string;
+  }>;
+  storage?: {
+    vector: string;
+    raster: string;
+  };
+  remoteSensing: RemoteSensingStatus;
+}
+
+export interface RemoteSensingProduct {
+  id: string;
+  title: string;
+  layerName: string;
+  source: string;
+  description: string;
+}
+
+export interface RemoteSensingRegion {
+  id: string;
+  name: string;
+  bbox: number[];
+  description?: string;
+}
+
+export interface RemoteSensingRun {
+  id: number;
+  status: 'running' | 'success' | 'partial' | 'failed';
+  triggeredBy: string;
+  targetDate: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  regionCount?: number;
+  productCount?: number;
+  assetCount: number;
+  errorCount: number;
+  message: string;
+}
+
+export interface RemoteSensingAsset {
+  id: number;
+  productId: string;
+  productTitle: string;
+  source: string;
+  layerName: string;
+  regionId: string;
+  regionName: string;
+  bbox: number[];
+  assetDate: string;
+  format: string;
+  filePath: string;
+  bytes: number;
+  width: number;
+  height: number;
+  wmsUrl: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface RemoteSensingStatus {
+  enabled: boolean;
+  syncOnStart: boolean;
+  intervalHours: number;
+  lagDays: number;
+  endpoint: string;
+  nextScheduledAt?: string | null;
+  inProgress: boolean;
+  manifestPath: string;
+  products: RemoteSensingProduct[];
+  regions: RemoteSensingRegion[];
+  summary: {
+    assetCount: number;
+    totalBytes: number;
+    totalSizeMb: number;
+    latestAssetDate?: string | null;
+    lastAssetAt?: string | null;
+  };
+  lastRun?: RemoteSensingRun | null;
+  recentRuns: RemoteSensingRun[];
+  recentAssets: RemoteSensingAsset[];
+}
+
+export interface MonitoringWorkflowStep {
+  key: string;
+  title: string;
+  status: 'done' | 'running' | 'waiting';
+  detail: string;
+}
+
+export interface MonitoringDataSource {
+  id: string;
+  title: string;
+  source: string;
+  status: 'ready' | 'running' | 'waiting' | 'standby';
+  availableAssets: number;
+  quality: number;
+  usage: string;
+}
+
+export interface MonitoringRegion {
+  id: string;
+  name: string;
+  bbox: number[];
+  description?: string;
+  assetCount: number;
+  activeAlertCount: number;
+}
+
+export interface MonitoringHazardPatch {
+  id: string;
+  name: string;
+  district: string;
+  hazardType: string;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  riskLabel: string;
+  confidence: number;
+  lat: number;
+  lng: number;
+  evidenceCount: number;
+  source: string;
+  reason: string;
+  recommendedAction: string;
+}
+
+export interface MonitoringReviewItem {
+  id: string;
+  type: string;
+  title: string;
+  siteName: string;
+  district: string;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  priority: number;
+  status: 'pending' | 'reviewing';
+  source: string;
+  createdAt?: string | null;
+  summary: string;
+}
+
+export interface MonitoringDailyOverview {
+  service: {
+    title: string;
+    subtitle: string;
+    targetDate?: string | null;
+    enabled: boolean;
+    inProgress: boolean;
+    nextScheduledAt?: string | null;
+    intervalHours: number;
+    lagDays: number;
+    lastRun?: RemoteSensingRun | null;
+  };
+  stats: DashboardStat[];
+  workflow: MonitoringWorkflowStep[];
+  dataSources: MonitoringDataSource[];
+  regions: MonitoringRegion[];
+  hazardPatches: MonitoringHazardPatch[];
+  reviewQueue: MonitoringReviewItem[];
+  recentAssets: RemoteSensingAsset[];
+  recentRuns: RemoteSensingRun[];
+  reportDraft: {
+    title: string;
+    riskSummary: string;
+    patchCount: number;
+    highRiskCount: number;
+    reviewCount: number;
+    recommendedActions: string[];
+  };
+}
+
+export interface GeoJsonFeature {
+  type: 'Feature';
+  geometry: {
+    type: string;
+    coordinates: unknown;
+  } | null;
+  properties: Record<string, string | number | boolean | null>;
+}
+
+export interface GeoJsonFeatureCollection {
+  type: 'FeatureCollection';
+  features: GeoJsonFeature[];
+  totalFeatures?: number;
+  returnedFeatures?: number;
+  previewLimited?: boolean;
+  previewLimit?: number | null;
+  offset?: number;
+  filters?: {
+    bbox?: number[];
+    property?: string;
+    value?: string;
+    keyword?: string;
+    limit?: number | null;
+    offset?: number;
+  };
+}
+
+export interface LandslideSampleOption {
+  label: string;
+  value: string;
+  count: number;
+}
+
+export interface LandslideSampleSummary {
+  source: {
+    name: string;
+    provider: string;
+    path: string;
+    bytes: number;
+    updatedAt: string | null;
+  };
+  summary: {
+    total: number;
+    rawTotal: number;
+    dated: number;
+    undated: number;
+    countries: number;
+    totalFatalities: number;
+    totalInjuries: number;
+    bounds: number[] | null;
+    dateRange: {
+      start: string | null;
+      end: string | null;
+    };
+  };
+  filtering: {
+    countryCodes: string[];
+    minEventDate: string;
+    rawTotal: number;
+    excludedTotal: number;
+    excludedByCountry: number;
+    excludedByDate: number;
+  };
+  categories: LandslideSampleOption[];
+  triggers: LandslideSampleOption[];
+  sizes: LandslideSampleOption[];
+  countries: LandslideSampleOption[];
+  regions: LandslideSampleOption[];
+  topCountries: LandslideSampleOption[];
+  topRegions: LandslideSampleOption[];
+  yearlyTrend: Array<{
+    year: string;
+    count: number;
+  }>;
+}
+
+export interface LandslideSampleItem {
+  id: string;
+  objectId: number | null;
+  eventId: string;
+  title: string;
+  description: string;
+  category: string;
+  trigger: string;
+  size: string;
+  setting: string;
+  countryName: string;
+  countryCode: string;
+  adminDivision: string;
+  locationDescription: string;
+  locationAccuracy: string;
+  closestPlace: string;
+  eventDate: string | null;
+  submittedDate: string | null;
+  fatalities: number;
+  injuries: number;
+  sourceName: string;
+  sourceLink: string;
+  photoLink: string;
+  lat: number;
+  lng: number;
+}
+
+export interface LandslideSampleResponse {
+  items: LandslideSampleItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  returned: number;
+  mapReturned: number;
+  previewLimited: boolean;
+  filters: Record<string, unknown>;
+  featureCollection: GeoJsonFeatureCollection;
 }

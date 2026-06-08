@@ -9,7 +9,7 @@ services:
       - .env.production
     environment:
       MODEL_DEVICE: ${MODEL_DEVICE:-cpu}
-      ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-true}
+      ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-false}
     volumes:
       - ./model-service/models:/app/model-service/models
     healthcheck:

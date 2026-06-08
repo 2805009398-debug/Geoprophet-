@@ -9,9 +9,10 @@ services:
       - .env.production
     environment:
       MODEL_DEVICE: ${MODEL_DEVICE:-cpu}
-      ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-true}
+      ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-false}
     volumes:
       - ./model-service/models:/app/model-service/models
+      - ./models:/app/models:ro
     healthcheck:
       test:
         - CMD
@@ -38,6 +39,7 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       AI_INFERENCE_BASE_URL: ${AI_INFERENCE_BASE_URL:-http://model-service:8000}
+      SQLITE_JOURNAL_MODE: ${SQLITE_JOURNAL_MODE:-wal}
     volumes:
       - ./backend/data:/app/backend/data
       - ./backend/uploads:/app/backend/uploads

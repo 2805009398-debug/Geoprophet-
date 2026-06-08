@@ -5,12 +5,15 @@ node_modules
 .tools
 dist
 frontend/dist
+frontend-code.zip
+.codex-run-logs/
 
 # 系统和运行时缓存
 .DS_Store
 __pycache__/
 .pytest_cache/
 .venv/
+.venv-*/
 
 # 后端本地数据库文件
 backend/data/*.db
@@ -24,9 +27,18 @@ backend/uploads/*
 # 模型文件体积较大，仅保留目录占位文件
 model-service/models/*
 !model-service/models/.gitkeep
+models/
+*.pt
+
+# 本地数据集和下载缓存
+data/
 
 # 日志文件
 npm-debug.log*
+*.log
 
 # 生产环境变量文件，避免提交敏感配置
+.env
+.env.local
+.env.*.local
 .env.production

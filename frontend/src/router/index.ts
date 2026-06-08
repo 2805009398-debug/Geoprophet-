@@ -2,14 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router';
 import AppShell from '../components/AppShell.vue';
 import { pinia } from '../stores';
 import { useAuthStore } from '../stores/auth';
-import AlertsView from '../views/AlertsView.vue';
-import AnalysisView from '../views/AnalysisView.vue';
 import DashboardView from '../views/DashboardView.vue';
-import DataCenterView from '../views/DataCenterView.vue';
+import DailyMonitoringView from '../views/DailyMonitoringView.vue';
+import LandslideDetectionView from '../views/LandslideDetectionView.vue';
 import LoginView from '../views/LoginView.vue';
-import PlansView from '../views/PlansView.vue';
+import PublicSubmitView from '../views/PublicSubmitView.vue';
 import ReportsView from '../views/ReportsView.vue';
-import SitesView from '../views/SitesView.vue';
+import DataCenterView from '../views/DataCenterView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -19,17 +18,20 @@ const router = createRouter({
       component: LoginView
     },
     {
+      path: '/submit',
+      component: PublicSubmitView
+    },
+    {
       path: '/',
       component: AppShell,
       meta: { requiresAuth: true },
       children: [
-        { path: '', component: DashboardView },
-        { path: 'sites', component: SitesView },
-        { path: 'ingestion', component: DataCenterView },
-        { path: 'alerts', component: AlertsView },
-        { path: 'reports', component: ReportsView },
-        { path: 'analysis', component: AnalysisView },
-        { path: 'plans', component: PlansView }
+        { path: '', component: DailyMonitoringView },
+        { path: 'dashboard', component: DashboardView },
+        { path: 'data-center', component: DataCenterView },
+        { path: 'landslide-samples', redirect: '/' },
+        { path: 'landslide-detection', component: LandslideDetectionView },
+        { path: 'reports', component: ReportsView }
       ]
     }
   ]
@@ -58,4 +60,3 @@ router.beforeEach(async (to) => {
 });
 
 export default router;
-

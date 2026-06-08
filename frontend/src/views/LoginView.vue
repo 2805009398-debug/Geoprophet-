@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Lock, User } from '@element-plus/icons-vue';
+import { ChatDotRound, Lock, User } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -9,12 +9,13 @@ const router = useRouter();
 const authStore = useAuthStore();
 
 const form = reactive({
-  username: 'admin',
-  password: 'admin123'
+  username: '',
+  password: ''
 });
 const loading = ref(false);
 
 const oidcEnabled = computed(() => authStore.providers?.oidc.enabled);
+const hasDemoAccounts = computed(() => authStore.demoAccounts.length > 0);
 
 async function submit() {
   loading.value = true;
@@ -35,6 +36,10 @@ function applyDemoAccount(account: { username: string; password: string }) {
   form.password = account.password;
 }
 
+function openPublicSubmit() {
+  router.push('/submit');
+}
+
 onMounted(async () => {
   try {
     await authStore.fetchProviders();
@@ -49,28 +54,27 @@ onMounted(async () => {
     <section class="login-hero">
       <div>
         <div class="section-kicker">GeoProphet 2026</div>
-        <h1>从监测到预警，把白山市地灾态势放到一张图里。</h1>
+        <h1>群众线索补充后台</h1>
         <p>
-          这个 Web 版聚焦政府监测与联调场景，覆盖数据接收管理、智能研判、预警联动、群众上报和应急预案编制，
-          对齐你提供的技术服务要求，并保留 OIDC 单点登录扩展入口。
+          面向值班员、网格员和基层干部，统一处理群众照片、位置和现场描述，完成补录、初筛和复核流转。
         </p>
       </div>
 
       <div class="hero-grid">
         <article>
-          <strong>4</strong>
-          <div>数据接入通道</div>
-          <p>遥感、传感器、视频流、群众上报统一纳管</p>
+          <strong>1</strong>
+          <div>公开入口</div>
+          <p>群众无需登录即可提交现场照片和位置</p>
         </article>
         <article>
-          <strong>7x24</strong>
-          <div>值守流程</div>
-          <p>支持实时预警跟踪、日志审计与应急预案联动</p>
+          <strong>3</strong>
+          <div>核心动作</div>
+          <p>补录、初筛、转交复核</p>
         </article>
         <article>
-          <strong>10</strong>
-          <div>并发目标</div>
-          <p>按照需求文档预留 REST API 对大屏和第三方集成</p>
+          <strong>轻量</strong>
+          <div>业务边界</div>
+          <p>补充线索，不替代政府监测平台</p>
         </article>
       </div>
     </section>
@@ -78,9 +82,9 @@ onMounted(async () => {
     <section class="login-panel">
       <div class="section-head">
         <div>
-          <div class="section-kicker" style="color: var(--muted)">Access</div>
-          <h2 class="section-title">平台登录</h2>
-          <p class="section-desc">默认提供本地账号登录，并预留统一身份认证入口。</p>
+          <div class="section-kicker">Access</div>
+          <h2 class="section-title">后台登录</h2>
+          <p class="section-desc">值班人员在这里处理群众线索；群众端请直接使用公开提交页。</p>
         </div>
         <el-tag :type="oidcEnabled ? 'success' : 'info'">
           {{ oidcEnabled ? 'OIDC 已配置' : 'OIDC 待配置' }}
@@ -100,30 +104,29 @@ onMounted(async () => {
           />
         </el-form-item>
 
-        <div class="grid-two" style="margin-top: 10px">
+        <div class="action-grid">
           <el-button type="primary" :loading="loading" @click="submit">进入平台</el-button>
-          <el-button plain :disabled="!oidcEnabled">统一身份认证</el-button>
+          <el-button plain :icon="ChatDotRound" @click="openPublicSubmit">公开提交页</el-button>
         </div>
       </el-form>
 
-      <el-divider content-position="left">演示账号</el-divider>
+      <template v-if="hasDemoAccounts">
+        <el-divider content-position="left">演示账号</el-divider>
 
-      <div class="info-strip">
-        <el-button
-          v-for="account in authStore.demoAccounts"
-          :key="account.username"
-          text
-          bg
-          @click="applyDemoAccount(account)"
-        >
-          {{ account.username }} / {{ account.role }}
-        </el-button>
-      </div>
+        <div class="info-strip">
+          <el-button
+            v-for="account in authStore.demoAccounts"
+            :key="account.username"
+            text
+            bg
+            @click="applyDemoAccount(account)"
+          >
+            {{ account.username }} / {{ account.role }}
+          </el-button>
+        </div>
 
-      <p class="table-note">
-        默认账号：`admin / admin123`、`operator / operator123`、`expert / expert123`
-      </p>
+        <p class="table-note">演示账号仅在 demo 模式展示。</p>
+      </template>
     </section>
   </div>
 </template>
-

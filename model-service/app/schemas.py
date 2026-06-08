@@ -29,8 +29,8 @@ class ClassificationPayload(BaseModel):
 
 
 class PredictionBase(BaseModel):
-    task_type: Literal["landslide", "glacier"] = Field(alias="taskType")
-    provider: Literal["pytorch", "heuristic-fallback"]
+    task_type: Literal["landslide"] = Field(alias="taskType")
+    provider: Literal["pytorch", "heuristic-fallback", "ultralytics-yolo"]
     model_name: str = Field(alias="modelName")
     summary: str
     confidence: float = Field(ge=0, le=1)
@@ -45,10 +45,6 @@ class LandslidePrediction(PredictionBase):
     classification: ClassificationPayload
     has_landslide: bool = Field(alias="hasLandslide")
     mask: list[list[int]]
-
-
-class GlacierPrediction(PredictionBase):
-    glacier_mask: list[list[int]] = Field(alias="glacierMask")
 
 
 class HealthResponse(BaseModel):

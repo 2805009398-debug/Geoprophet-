@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    strictPort: true,
     host: '0.0.0.0',
     proxy: {
       '/api': {
@@ -14,6 +15,10 @@ export default defineConfig({
         changeOrigin: true
       },
       '/uploads': {
+        target: apiTarget,
+        changeOrigin: true
+      },
+      '/remote-sensing-assets': {
         target: apiTarget,
         changeOrigin: true
       }

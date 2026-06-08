@@ -6,18 +6,49 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Database.Database;
     appConfig: {
+      appMode: 'demo' | 'production';
       port: number;
       host: string;
-    jwtSecret: string;
-    oidcEnabled: boolean;
-    oidcIssuer?: string;
-    oidcClientId?: string;
-    oidcRedirectUri?: string;
-    aiInferenceBaseUrl?: string;
-    aiLandslideEndpoint: string;
-    aiGlacierEndpoint: string;
-  };
-}
+      sqliteJournalMode: 'wal' | 'delete';
+      trustProxy: boolean;
+      corsOrigins: string[];
+      jwtSecret: string;
+      exposeDemoAccounts: boolean;
+      initialAdminUsername?: string;
+      initialAdminPassword?: string;
+      initialAdminDisplayName?: string;
+      oidcEnabled: boolean;
+      oidcIssuer?: string;
+      oidcClientId?: string;
+      oidcRedirectUri?: string;
+      aiInferenceBaseUrl?: string;
+      aiLandslideEndpoint: string;
+      aiInferenceTimeoutMs: number;
+      visionProvider: 'disabled' | 'doubao' | 'openai-compatible' | 'deepseek';
+      visionApiKey?: string;
+      visionBaseUrl?: string;
+      visionModel?: string;
+      visionChatEndpoint: string;
+      visionTimeoutMs: number;
+      postgisDatabaseUrl?: string;
+      geohazardsPreferPostgis: boolean;
+      postgisConnectionTimeoutMs: number;
+      healthCheckTimeoutMs: number;
+      rateLimitWindowMs: number;
+      authRateLimitMax: number;
+      publicRateLimitMax: number;
+      analysisRateLimitMax: number;
+      remoteSensingSyncEnabled: boolean;
+      remoteSensingSyncOnStart: boolean;
+      remoteSensingSyncIntervalHours: number;
+      remoteSensingLagDays: number;
+      remoteSensingMaxImageWidth: number;
+      remoteSensingRequestTimeoutMs: number;
+      remoteSensingGibsEndpoint: string;
+      remoteSensingProducts: string[];
+      remoteSensingRegions: string[];
+    };
+  }
 }
 
 declare module '@fastify/jwt' {

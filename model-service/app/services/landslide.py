@@ -1,20 +1,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import torch
 from PIL import Image
-from torchvision import models, transforms
-import segmentation_models_pytorch as smp
+from torchvision import transforms
 
 from app.config import Settings
 from app.utils import deterministic_seed, heuristic_mask, mask_to_polygons, read_rgb_image
 
+try:
+    from ultralytics import YOLO
+except Exception:  # pragma: no cover - 依赖缺失时允许服务降级
+    YOLO = None
+
+
+MASK_SIZE = 256
+
 
 @dataclass
 class LandslideArtifacts:
-    # 分类器和分割器都允许为空，这样服务在缺少权重时仍可按配置降级运行。
+    # 训练好的 YOLO 检测器优先使用，老的分类/分割模型保留为兼容回退方案。
+    yolo: Any | None
     classifier: torch.nn.Module | None
     segmenter: torch.nn.Module | None
     warning: str | None
@@ -24,7 +33,6 @@ class LandslideService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.device = self._resolve_device(settings.device)
-        # 分类阶段沿用常见的 ImageNet 预处理，与 ResNet18 微调时保持一致。
         self.preprocess = transforms.Compose(
             [
                 transforms.Resize((224, 224)),
@@ -32,10 +40,9 @@ class LandslideService:
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
-        # 分割阶段使用单独尺寸，便于和训练 UNet 时的输入约定保持一致。
         self.segment_preprocess = transforms.Compose(
             [
-                transforms.Resize((256, 256)),
+                transforms.Resize((MASK_SIZE, MASK_SIZE)),
                 transforms.ToTensor(),
             ]
         )
@@ -43,25 +50,88 @@ class LandslideService:
 
     @property
     def is_ready(self) -> bool:
-        return self.artifacts.classifier is not None and self.artifacts.segmenter is not None
+        return self.artifacts.yolo is not None or (
+            self.artifacts.classifier is not None and self.artifacts.segmenter is not None
+        )
 
     def predict(self, file_bytes: bytes) -> dict[str, object]:
         image = read_rgb_image(file_bytes)
 
-        # 正式权重就绪时走真实 PyTorch 推理，否则按配置决定是否进入降级逻辑。
-        if self.is_ready:
-            return self._predict_with_models(image)
+        if self.artifacts.yolo is not None:
+            return self._predict_with_yolo(image)
+
+        if self.artifacts.classifier is not None and self.artifacts.segmenter is not None:
+            return self._predict_with_legacy_models(image)
 
         if not self.settings.allow_heuristic_fallback:
             raise RuntimeError("滑坡模型权重未加载，且当前禁用了降级推理。")
 
         return self._predict_with_fallback(file_bytes)
 
-    def _predict_with_models(self, image: Image.Image) -> dict[str, object]:
+    def _predict_with_yolo(self, image: Image.Image) -> dict[str, object]:
+        assert self.artifacts.yolo is not None
+
+        results = self.artifacts.yolo.predict(
+            source=image,
+            imgsz=self.settings.landslide_yolo_imgsz,
+            conf=self.settings.landslide_yolo_conf,
+            iou=self.settings.landslide_yolo_iou,
+            max_det=self.settings.landslide_yolo_max_det,
+            device=self._yolo_device_argument(),
+            verbose=False,
+        )
+        result = results[0]
+        image_width, image_height = image.size
+
+        boxes = np.empty((0, 4), dtype="float32")
+        scores = np.empty((0,), dtype="float32")
+        if result.boxes is not None and len(result.boxes) > 0:
+            boxes = result.boxes.xyxy.detach().cpu().numpy().astype("float32")
+            scores = result.boxes.conf.detach().cpu().numpy().astype("float32")
+
+        regions = self._boxes_to_regions(boxes, scores, image_width, image_height)
+        has_landslide = len(regions) > 0
+        mask = self._boxes_to_mask(boxes, image_width, image_height)
+        top_confidence = float(scores.max()) if len(scores) else 0.0
+        confidence = float(round(top_confidence if has_landslide else (1 - self.settings.landslide_yolo_conf), 4))
+
+        if has_landslide:
+            summary = f"检测到 {len(regions)} 处疑似滑坡区域，建议结合现场踏勘进一步复核。"
+        else:
+            summary = "未检出明显滑坡目标，可作为巡查背景样本留存。"
+
+        return {
+            "taskType": "landslide",
+            "provider": "ultralytics-yolo",
+            "modelName": "YOLOv8n-Landslide",
+            "summary": summary,
+            "confidence": confidence,
+            "classification": {
+                "hasHazard": has_landslide,
+                "label": "landslide" if has_landslide else "no-landslide",
+                "confidence": confidence,
+            },
+            "hasLandslide": has_landslide,
+            "mask": mask.tolist(),
+            "segmentation": {"regions": regions},
+            "metadata": {
+                "device": self.device.type,
+                "inputMode": "ground-or-uav-photo",
+                "segmentationTriggered": has_landslide,
+                "maskShape": f"{MASK_SIZE}x{MASK_SIZE}",
+                "detectionCount": len(regions),
+                "detectionThreshold": self.settings.landslide_yolo_conf,
+                "iouThreshold": self.settings.landslide_yolo_iou,
+                "imageWidth": image_width,
+                "imageHeight": image_height,
+            },
+            "warning": self.artifacts.warning,
+        }
+
+    def _predict_with_legacy_models(self, image: Image.Image) -> dict[str, object]:
         assert self.artifacts.classifier is not None
         assert self.artifacts.segmenter is not None
 
-        # 第一步先做有/无滑坡分类，避免对明显正常样本执行更重的分割推理。
         input_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
         with torch.inference_mode():
             logits = self.artifacts.classifier(input_tensor)
@@ -70,7 +140,7 @@ class LandslideService:
             has_landslide = confidence >= self.settings.landslide_cls_threshold
 
         if not has_landslide:
-            empty_mask = np.zeros((256, 256), dtype="uint8")
+            empty_mask = np.zeros((MASK_SIZE, MASK_SIZE), dtype="uint8")
             return {
                 "taskType": "landslide",
                 "provider": "pytorch",
@@ -92,16 +162,13 @@ class LandslideService:
                 "warning": self.artifacts.warning,
             }
 
-        # 只有分类通过阈值时，才继续执行区域分割。
         segment_input = self.segment_preprocess(image).unsqueeze(0).to(self.device)
         with torch.inference_mode():
             mask_logits = self.artifacts.segmenter(segment_input)
-            # Sigmoid 输出是像素概率图，这里按阈值转成 0/1 mask。
             mask = (mask_logits.squeeze().detach().cpu().numpy() > self.settings.landslide_mask_threshold).astype(
                 "uint8"
             )
 
-        # 当前主后端更适合消费简单 polygon，因此这里把 mask 再提炼成外接区域。
         regions = mask_to_polygons(mask, "疑似滑坡区域", confidence)
         return {
             "taskType": "landslide",
@@ -120,17 +187,18 @@ class LandslideService:
             "metadata": {
                 "device": self.device.type,
                 "segmentationTriggered": True,
-                "maskShape": "256x256",
+                "maskShape": f"{MASK_SIZE}x{MASK_SIZE}",
             },
             "warning": self.artifacts.warning,
         }
 
     def _predict_with_fallback(self, file_bytes: bytes) -> dict[str, object]:
-        # 降级模式只用于接口联调：基于文件内容生成稳定伪结果，保证同文件多次请求一致。
         seed = deterministic_seed(file_bytes, "landslide")
         has_landslide = seed >= 0.38
         confidence = float(round((0.68 + seed * 0.25) if has_landslide else (0.61 + (0.38 - seed) * 0.4), 4))
-        mask = heuristic_mask((256, 256), seed, "landslide") if has_landslide else np.zeros((256, 256), dtype="uint8")
+        mask = heuristic_mask((MASK_SIZE, MASK_SIZE), seed, "landslide") if has_landslide else np.zeros(
+            (MASK_SIZE, MASK_SIZE), dtype="uint8"
+        )
         regions = mask_to_polygons(mask, "疑似滑坡区域", confidence)
 
         return {
@@ -155,20 +223,46 @@ class LandslideService:
         }
 
     def _load_models(self) -> LandslideArtifacts:
-        missing = []
+        yolo_model = self._load_yolo_model()
+        if yolo_model is not None:
+            return LandslideArtifacts(yolo=yolo_model, classifier=None, segmenter=None, warning=None)
+
+        legacy = self._load_legacy_models()
+        if legacy is not None:
+            return legacy
+
+        warning_messages: list[str] = []
+        if not self.settings.landslide_yolo_path.exists():
+            warning_messages.append(f"missing-model-file: {self.settings.landslide_yolo_path.name}")
+        elif YOLO is None:
+            warning_messages.append("missing-dependency: ultralytics")
+        else:
+            warning_messages.append(f"failed-to-load: {self.settings.landslide_yolo_path.name}")
+
         if not self.settings.landslide_classifier_path.exists():
-            missing.append(str(self.settings.landslide_classifier_path.name))
+            warning_messages.append(f"missing-model-file: {self.settings.landslide_classifier_path.name}")
         if not self.settings.landslide_segmenter_path.exists():
-            missing.append(str(self.settings.landslide_segmenter_path.name))
+            warning_messages.append(f"missing-model-file: {self.settings.landslide_segmenter_path.name}")
 
-        if missing:
-            return LandslideArtifacts(
-                classifier=None,
-                segmenter=None,
-                warning=f"missing-model-files: {', '.join(missing)}",
-            )
+        warning = "; ".join(warning_messages) if warning_messages else "no-models-loaded"
+        return LandslideArtifacts(yolo=None, classifier=None, segmenter=None, warning=warning)
 
-        # 分类模型：ResNet18 二分类，输出 [无滑坡, 有滑坡] 两类。
+    def _load_yolo_model(self) -> Any | None:
+        if YOLO is None or not self.settings.landslide_yolo_path.exists():
+            return None
+
+        model = YOLO(str(self.settings.landslide_yolo_path))
+        return model
+
+    def _load_legacy_models(self) -> LandslideArtifacts | None:
+        if not (
+            self.settings.landslide_classifier_path.exists() and self.settings.landslide_segmenter_path.exists()
+        ):
+            return None
+
+        from torchvision import models
+        import segmentation_models_pytorch as smp
+
         classifier = models.resnet18()
         classifier.fc = torch.nn.Linear(classifier.fc.in_features, 2)
         classifier.load_state_dict(
@@ -177,21 +271,64 @@ class LandslideService:
         classifier = classifier.to(self.device)
         classifier.eval()
 
-        # 分割模型：UNet 输出单通道滑坡概率图。
         segmenter = smp.Unet(encoder_name="resnet34", classes=1, activation="sigmoid")
         segmenter.load_state_dict(
             torch.load(self.settings.landslide_segmenter_path, map_location=self.device, weights_only=False)
         )
         segmenter = segmenter.to(self.device)
         segmenter.eval()
-
-        return LandslideArtifacts(classifier=classifier, segmenter=segmenter, warning=None)
+        return LandslideArtifacts(yolo=None, classifier=classifier, segmenter=segmenter, warning=None)
 
     @staticmethod
     def _resolve_device(requested_device: str) -> torch.device:
-        # auto 会优先使用 CUDA；如果显式请求了 CUDA 但机器不支持，则自动回退到 CPU。
         if requested_device == "auto":
             return torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if requested_device.startswith("cuda") and not torch.cuda.is_available():
             return torch.device("cpu")
         return torch.device(requested_device)
+
+    def _yolo_device_argument(self) -> str | int:
+        if self.device.type != "cuda":
+            return "cpu"
+        if self.device.index in (None, 0):
+            return 0
+        return str(self.device)
+
+    @staticmethod
+    def _boxes_to_regions(
+        boxes: np.ndarray, scores: np.ndarray, image_width: int, image_height: int
+    ) -> list[dict[str, object]]:
+        regions: list[dict[str, object]] = []
+        for index, (box, score) in enumerate(zip(boxes, scores), start=1):
+            x_min, y_min, x_max, y_max = [float(value) for value in box]
+            polygon = [
+                {"x": max(0.0, min(1.0, x_min / image_width)), "y": max(0.0, min(1.0, y_min / image_height))},
+                {"x": max(0.0, min(1.0, x_max / image_width)), "y": max(0.0, min(1.0, y_min / image_height))},
+                {"x": max(0.0, min(1.0, x_max / image_width)), "y": max(0.0, min(1.0, y_max / image_height))},
+                {"x": max(0.0, min(1.0, x_min / image_width)), "y": max(0.0, min(1.0, y_max / image_height))},
+            ]
+            regions.append(
+                {
+                    "label": f"疑似滑坡区域 {index}",
+                    "score": float(round(float(score), 4)),
+                    "polygon": polygon,
+                }
+            )
+        return regions
+
+    @staticmethod
+    def _boxes_to_mask(boxes: np.ndarray, image_width: int, image_height: int) -> np.ndarray:
+        mask = np.zeros((MASK_SIZE, MASK_SIZE), dtype="uint8")
+        if not len(boxes):
+            return mask
+
+        scale_x = MASK_SIZE / max(image_width, 1)
+        scale_y = MASK_SIZE / max(image_height, 1)
+        for box in boxes:
+            x_min, y_min, x_max, y_max = [float(value) for value in box]
+            left = max(0, min(MASK_SIZE - 1, int(np.floor(x_min * scale_x))))
+            top = max(0, min(MASK_SIZE - 1, int(np.floor(y_min * scale_y))))
+            right = max(left + 1, min(MASK_SIZE, int(np.ceil(x_max * scale_x))))
+            bottom = max(top + 1, min(MASK_SIZE, int(np.ceil(y_max * scale_y))))
+            mask[top:bottom, left:right] = 1
+        return mask

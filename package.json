@@ -9,10 +9,17 @@
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
-    "start": "npm run start --workspace backend"
+    "start": "npm run start --workspace backend",
+    "doubao:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-doubao-local.ps1",
+    "yolo:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-yolo-local-stack.ps1",
+    "yolo:dev:cpu": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-yolo-local-stack.ps1 -UseCpu",
+    "yolo:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\status-yolo-local-stack.ps1",
+    "yolo:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-yolo-local-stack.ps1",
+    "gpt-oss:setup": "powershell -ExecutionPolicy Bypass -File .\\scripts\\setup-gpt-oss-20b.ps1",
+    "gpt-oss:chat": "powershell -ExecutionPolicy Bypass -File .\\scripts\\chat-gpt-oss-20b.ps1",
+    "gpt-oss:chat:openai": "powershell -ExecutionPolicy Bypass -File .\\scripts\\chat-gpt-oss-openai.ps1"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
   }
 }
-

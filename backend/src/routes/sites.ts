@@ -85,7 +85,7 @@ export async function siteRoutes(fastify: FastifyInstance) {
       .get(params.id);
 
     if (!site) {
-      return reply.code(404).send({ message: '未找到对应监测点。' });
+      return reply.code(404).send({ message: '未找到对应监测点。', requestId: request.id });
     }
 
     const sensors = fastify.db
@@ -143,4 +143,3 @@ export async function siteRoutes(fastify: FastifyInstance) {
     return { site, sensors, observations, assessment };
   });
 }
-

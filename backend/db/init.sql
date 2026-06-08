@@ -73,6 +73,14 @@ CREATE TABLE IF NOT EXISTS crowd_reports (
   lat REAL NOT NULL,
   lng REAL NOT NULL,
   confidence_score REAL NOT NULL,
+  ai_analysis_run_id INTEGER,
+  ai_provider TEXT,
+  ai_model_name TEXT,
+  ai_risk_level TEXT,
+  ai_risk_label TEXT,
+  ai_summary TEXT,
+  ai_recommended_action TEXT,
+  ai_review_required INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
   FOREIGN KEY(site_id) REFERENCES sites(id) ON DELETE SET NULL
@@ -115,17 +123,6 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS emergency_plans (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL UNIQUE,
-  level TEXT NOT NULL,
-  status TEXT NOT NULL,
-  leader TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  resource_summary TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS system_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category TEXT NOT NULL,
@@ -133,6 +130,52 @@ CREATE TABLE IF NOT EXISTS system_logs (
   message TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_id INTEGER,
+  actor_name TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  summary TEXT NOT NULL,
+  metadata_json TEXT,
+  request_id TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS domain_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type TEXT NOT NULL,
+  aggregate_type TEXT NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  payload_json TEXT,
+  status TEXT NOT NULL,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  request_id TEXT,
+  created_at TEXT NOT NULL,
+  published_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_status_created_at ON alerts(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_crowd_reports_status_created_at ON crowd_reports(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_crowd_reports_ai_analysis_run ON crowd_reports(ai_analysis_run_id);
+CREATE INDEX IF NOT EXISTS idx_observations_sensor_observed_at ON observations(sensor_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_created_at ON analysis_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_domain_events_status_created_at ON domain_events(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_domain_events_aggregate ON domain_events(aggregate_type, aggregate_id);
 
 INSERT OR IGNORE INTO sites (id, code, name, district, hazard_type, risk_level, status, lat, lng, last_inspection_at, description) VALUES
   (1, 'BS-JY-001', '七道江滑坡群', '江源区', '滑坡', 'critical', 'warning', 41.908, 126.580, '2026-04-22 15:10:00', '居民点上方山体出现连续位移，需重点巡查与限行。'),
@@ -213,19 +256,13 @@ INSERT OR IGNORE INTO analysis_models (id, name, category, version, accuracy, st
   (1, 'LandslideVision', '滑坡识别', 'v2.1.0', 0.93, 'stable', '2026-04-23 08:00:00', '融合裂缝图像与坡面纹理特征，支持群众图片 AI 初审。'),
   (2, 'DebrisFlow Sentinel', '泥石流预警', 'v1.8.4', 0.91, 'stable', '2026-04-23 07:45:00', '结合雨量、泥位和地形参数进行触发概率预测。'),
   (3, 'Subsidence Prophet', '沉陷分析', 'v1.4.2', 0.88, 'training', '2026-04-22 18:10:00', '使用时序沉降数据和地下水位数据进行趋势外推。'),
-  (4, 'Multi-source Fusion Engine', '多源融合', 'v3.0.1', 0.95, 'stable', '2026-04-23 06:30:00', '整合遥感、视频、传感器和群众上报数据，生成统一态势底板。'),
-  (5, 'GlacierSAR-Net', '冰川识别', 'v1.0.0', 0.89, 'stable', '2026-04-23 05:40:00', '面向 InSAR 幅值/相位输入的冰川边界识别与变化敏感区分割模型。');
+  (4, 'Multi-source Fusion Engine', '多源融合', 'v3.0.1', 0.95, 'stable', '2026-04-23 06:30:00', '整合遥感、视频、传感器和群众上报数据，生成统一态势底板。');
 
 INSERT OR IGNORE INTO assessments (id, site_id, level, population_affected, economic_loss, road_impact, summary, created_at) VALUES
   (1, 1, '重大', 126, 380.0, '影响乡道 X214 半幅通行', '若持续降雨，可能影响居民点 38 户及下方乡道。', '2026-04-23 08:40:00'),
   (2, 2, '较大', 84, 210.0, '影响沟口便道与 1 处桥涵', '泥石流沟下游有临时安置点，需提前预警疏散。', '2026-04-23 08:00:00'),
   (3, 4, '较大', 42, 160.0, '工业园区支路受影响', '沉陷区若继续扩大，将影响园区围挡与地下管网。', '2026-04-22 17:10:00'),
   (4, 3, '一般', 12, 35.0, '沿江步道可能临时封闭', '适合通过视频巡检和护坡加固处置。', '2026-04-21 15:00:00');
-
-INSERT OR IGNORE INTO emergency_plans (id, title, level, status, leader, summary, resource_summary, updated_at) VALUES
-  (1, '七道江滑坡群紧急转移预案', 'I级', '已启动', '江源区应急指挥部', '包含分区撤离路线、临时安置点启用和夜间巡查安排。', '转移车辆 8 台、编织袋 2000 个、无人机 2 架、专家 3 人', '2026-04-23 08:20:00'),
-  (2, '红土崖泥石流沟联防联控方案', 'II级', '待命', '浑江区自然资源局', '以雨量阈值和泥位阈值双触发，联动乡镇和交通部门。', '抢险队伍 2 支、装载机 1 台、卫星电话 4 部', '2026-04-23 07:30:00'),
-  (3, '松江河沉陷区综合治理方案', 'III级', '编制中', '抚松县住建局', '围绕地下水开采控制、地表裂缝处置与长期监测布设展开。', '沉降监测点增设 6 处、地质勘探班组 1 支', '2026-04-22 16:50:00');
 
 INSERT OR IGNORE INTO system_logs (id, category, level, message, created_at) VALUES
   (1, 'ingestion', 'info', '传感器网关接收 12 条位移数据并完成入库。', '2026-04-23 08:31:00'),

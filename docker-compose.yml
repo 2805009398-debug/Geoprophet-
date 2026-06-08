@@ -9,8 +9,9 @@ services:
       ALLOW_HEURISTIC_FALLBACK: "true"
     volumes:
       - ./model-service/models:/app/model-service/models
+      - ./models:/app/models:ro
     ports:
-      - "8000:8000"
+      - "${MODEL_PORT:-8000}:8000"
 
   api:
     build:
@@ -18,14 +19,23 @@ services:
       dockerfile: backend/Dockerfile
     container_name: geoprophet-api
     depends_on:
-      - model-service
+      model-service:
+        condition: service_started
     environment:
       PORT: 3000
       HOST: 0.0.0.0
       JWT_SECRET: geoprophet-demo-secret
       AI_INFERENCE_BASE_URL: http://model-service:8000
+      SQLITE_JOURNAL_MODE: ${SQLITE_JOURNAL_MODE:-delete}
+      VISION_PROVIDER: ${VISION_PROVIDER:-disabled}
+      VISION_BASE_URL: ${VISION_BASE_URL:-}
+      VISION_CHAT_ENDPOINT: ${VISION_CHAT_ENDPOINT:-chat/completions}
+      VISION_MODEL: ${VISION_MODEL:-}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      VISION_TIMEOUT_MS: ${VISION_TIMEOUT_MS:-45000}
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     volumes:
       - ./backend/data:/app/backend/data
       - ./backend/uploads:/app/backend/uploads
@@ -38,4 +48,4 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-8080}:80"
