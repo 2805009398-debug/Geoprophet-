@@ -47,6 +47,13 @@ declare module 'fastify' {
       remoteSensingGibsEndpoint: string;
       remoteSensingProducts: string[];
       remoteSensingRegions: string[];
+      geeEnabled: boolean;
+      geeTileUrlTemplate?: string;
+      geeLayerTitle: string;
+      geeAttribution: string;
+      geeOpacity: number;
+      geeMinZoom: number;
+      geeMaxZoom: number;
     };
   }
 }

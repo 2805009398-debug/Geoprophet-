@@ -90,6 +90,30 @@ export async function geohazardRoutes(fastify: FastifyInstance) {
     getRemoteSensingStatus(fastify)
   ));
 
+  fastify.get('/api/geohazards/weather', { preHandler: authenticate }, async (request) => {
+    const query = z.object({
+      lat: z.coerce.number().min(-90).max(90),
+      lng: z.coerce.number().min(-180).max(180),
+      label: z.string().trim().max(80).optional()
+    }).parse(request.query ?? {});
+
+    return getWeatherSnapshot(query.lat, query.lng, query.label);
+  });
+
+  fastify.get('/api/geohazards/gee/map', { preHandler: authenticate }, async () => ({
+    enabled: fastify.appConfig.geeEnabled && Boolean(fastify.appConfig.geeTileUrlTemplate),
+    configured: Boolean(fastify.appConfig.geeTileUrlTemplate),
+    title: fastify.appConfig.geeLayerTitle,
+    tileUrlTemplate: fastify.appConfig.geeTileUrlTemplate ?? null,
+    attribution: fastify.appConfig.geeAttribution,
+    opacity: fastify.appConfig.geeOpacity,
+    minZoom: fastify.appConfig.geeMinZoom,
+    maxZoom: fastify.appConfig.geeMaxZoom,
+    note: fastify.appConfig.geeTileUrlTemplate
+      ? '已配置 Google Earth Engine 瓦片模板，可在地图中叠加。'
+      : '未配置 GEE_TILE_URL_TEMPLATE。请在后端通过服务账号或 Earth Engine 脚本生成瓦片模板后填入环境变量。'
+  }));
+
   fastify.post('/api/geohazards/remote-sensing/sync', { preHandler: [authenticate, requireRoles('admin', 'operator', 'expert')] }, async (request, reply) => {
     const query = z.object({ targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).parse(request.query ?? {});
     const result = await syncRemoteSensingAssets(fastify, {
@@ -619,4 +643,189 @@ function toNumber(value: unknown) {
 
 function toMegabytes(bytes: number) {
   return Number((bytes / 1024 / 1024).toFixed(2));
+}
+
+async function getWeatherSnapshot(lat: number, lng: number, label?: string) {
+  const url = new URL('https://api.open-meteo.com/v1/forecast');
+  url.searchParams.set('latitude', String(lat));
+  url.searchParams.set('longitude', String(lng));
+  url.searchParams.set('timezone', 'auto');
+  url.searchParams.set('forecast_days', '2');
+  url.searchParams.set('past_days', '1');
+  url.searchParams.set(
+    'current',
+    [
+      'temperature_2m',
+      'relative_humidity_2m',
+      'apparent_temperature',
+      'precipitation',
+      'rain',
+      'weather_code',
+      'cloud_cover',
+      'wind_speed_10m',
+      'wind_direction_10m',
+      'wind_gusts_10m'
+    ].join(',')
+  );
+  url.searchParams.set(
+    'hourly',
+    ['precipitation', 'precipitation_probability', 'relative_humidity_2m'].join(',')
+  );
+  url.searchParams.set(
+    'daily',
+    ['precipitation_sum', 'precipitation_probability_max'].join(',')
+  );
+
+  const response = await fetchWithTimeout(url.toString(), 8000);
+  if (!response.ok) {
+    throw new Error(`Open-Meteo HTTP ${response.status}`);
+  }
+
+  const payload = await response.json() as {
+    latitude?: number;
+    longitude?: number;
+    timezone?: string;
+    current?: Record<string, unknown>;
+    current_units?: Record<string, string>;
+    hourly?: {
+      time?: string[];
+      precipitation?: number[];
+      precipitation_probability?: number[];
+      relative_humidity_2m?: number[];
+    };
+    daily?: {
+      time?: string[];
+      precipitation_sum?: number[];
+      precipitation_probability_max?: number[];
+    };
+  };
+
+  const currentTime = String(payload.current?.time ?? new Date().toISOString());
+  const last24hPrecipitation = sumRecentHourly(payload.hourly?.time, payload.hourly?.precipitation, currentTime, 24);
+  const next24hPrecipitation = sumFutureHourly(payload.hourly?.time, payload.hourly?.precipitation, currentTime, 24);
+  const maxNext24hProbability = maxFutureHourly(
+    payload.hourly?.time,
+    payload.hourly?.precipitation_probability,
+    currentTime,
+    24
+  );
+  const currentPrecipitation = toNumber(payload.current?.precipitation);
+  const risk = classifyWeatherRisk(currentPrecipitation, last24hPrecipitation, next24hPrecipitation, maxNext24hProbability);
+
+  return {
+    provider: 'Open-Meteo',
+    label: label || '当前AOI',
+    lat,
+    lng,
+    timezone: payload.timezone ?? null,
+    fetchedAt: new Date().toISOString(),
+    current: {
+      time: currentTime,
+      temperature: toNullableNumber(payload.current?.temperature_2m),
+      apparentTemperature: toNullableNumber(payload.current?.apparent_temperature),
+      relativeHumidity: toNullableNumber(payload.current?.relative_humidity_2m),
+      precipitation: currentPrecipitation,
+      rain: toNullableNumber(payload.current?.rain),
+      weatherCode: toNullableNumber(payload.current?.weather_code),
+      cloudCover: toNullableNumber(payload.current?.cloud_cover),
+      windSpeed: toNullableNumber(payload.current?.wind_speed_10m),
+      windDirection: toNullableNumber(payload.current?.wind_direction_10m),
+      windGusts: toNullableNumber(payload.current?.wind_gusts_10m)
+    },
+    rainfall: {
+      last24h: Number(last24hPrecipitation.toFixed(1)),
+      next24h: Number(next24hPrecipitation.toFixed(1)),
+      next24hProbability: maxNext24hProbability
+    },
+    daily: (payload.daily?.time ?? []).slice(0, 2).map((day, index) => ({
+      date: day,
+      precipitationSum: toNullableNumber(payload.daily?.precipitation_sum?.[index]),
+      precipitationProbabilityMax: toNullableNumber(payload.daily?.precipitation_probability_max?.[index])
+    })),
+    risk,
+    sourceUrl: url.toString()
+  };
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'user-agent': 'GeoProphet weather context/0.1'
+      }
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sumRecentHourly(times: string[] = [], values: number[] = [], currentTime: string, hours: number) {
+  const currentMs = Date.parse(currentTime);
+  const startMs = currentMs - hours * 60 * 60 * 1000;
+  return times.reduce((sum, time, index) => {
+    const timeMs = Date.parse(time);
+    if (!Number.isFinite(timeMs) || timeMs < startMs || timeMs > currentMs) {
+      return sum;
+    }
+    return sum + toNumber(values[index]);
+  }, 0);
+}
+
+function sumFutureHourly(times: string[] = [], values: number[] = [], currentTime: string, hours: number) {
+  const currentMs = Date.parse(currentTime);
+  const endMs = currentMs + hours * 60 * 60 * 1000;
+  return times.reduce((sum, time, index) => {
+    const timeMs = Date.parse(time);
+    if (!Number.isFinite(timeMs) || timeMs < currentMs || timeMs > endMs) {
+      return sum;
+    }
+    return sum + toNumber(values[index]);
+  }, 0);
+}
+
+function maxFutureHourly(times: string[] = [], values: number[] = [], currentTime: string, hours: number) {
+  const currentMs = Date.parse(currentTime);
+  const endMs = currentMs + hours * 60 * 60 * 1000;
+  const candidates = times
+    .map((time, index) => ({ timeMs: Date.parse(time), value: Number(values[index]) }))
+    .filter((item) => Number.isFinite(item.timeMs) && item.timeMs >= currentMs && item.timeMs <= endMs)
+    .map((item) => item.value)
+    .filter(Number.isFinite);
+  return candidates.length > 0 ? Math.max(...candidates) : null;
+}
+
+function classifyWeatherRisk(
+  currentPrecipitation: number,
+  last24hPrecipitation: number,
+  next24hPrecipitation: number,
+  next24hProbability: number | null
+) {
+  const probability = next24hProbability ?? 0;
+  const score = Math.min(
+    100,
+    Math.round(
+      currentPrecipitation * 9 +
+      last24hPrecipitation * 1.2 +
+      next24hPrecipitation +
+      probability * 0.25
+    )
+  );
+  const level = score >= 70 || last24hPrecipitation >= 50 ? 'high' : score >= 35 || last24hPrecipitation >= 20 ? 'medium' : 'low';
+  const label = level === 'high' ? '强降雨触发关注' : level === 'medium' ? '降雨触发观察' : '常规天气关注';
+
+  return {
+    level,
+    score,
+    label,
+    basis: `近24小时降雨 ${last24hPrecipitation.toFixed(1)} mm，未来24小时预估 ${next24hPrecipitation.toFixed(1)} mm，最高降雨概率 ${next24hProbability ?? 0}%。`
+  };
+}
+
+function toNullableNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }

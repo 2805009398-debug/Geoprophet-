@@ -7,8 +7,10 @@ import type {
   DashboardOverview,
   GeoJsonFeatureCollection,
   GeohazardOverview,
+  RegionBoundary,
   RemoteSensingAsset,
-  SystemLog
+  SystemLog,
+  WeatherSnapshot
 } from '../types';
 
 type LayerRequestParams = {
@@ -36,12 +38,15 @@ const geohazard = ref<GeohazardOverview | null>(null);
 const selectedLayerId = ref('');
 const selectedLayerParams = ref<LayerRequestParams>({});
 const selectedLayer = ref<GeoJsonFeatureCollection | null>(null);
+const regionBoundaries = ref<RegionBoundary[]>([]);
 const activeFocus = ref<'yunnan' | 'all'>('yunnan');
 const loading = ref(false);
 const layerLoading = ref(false);
 const remoteSyncLoading = ref(false);
+const weatherLoading = ref(false);
 const remotePreviewVisible = ref(false);
 const remotePreviewAsset = ref<RemoteSensingAsset | null>(null);
+const weather = ref<WeatherSnapshot | null>(null);
 
 async function fetchData() {
   loading.value = true;
@@ -64,7 +69,9 @@ async function fetchData() {
       selectedLayerId.value = defaultLayer.id;
       selectedLayerParams.value = defaultLayer.id === yunnanFocus.layerId ? { ...yunnanFocus.params } : {};
       activeFocus.value = defaultLayer.id === yunnanFocus.layerId ? 'yunnan' : 'all';
+      await fetchRegionBoundaries();
       await fetchLayer(defaultLayer.id);
+      await fetchWeather();
     }
   } finally {
     loading.value = false;
@@ -228,6 +235,34 @@ const layerResultNote = computed(() => {
   const limited = selectedLayer.value.previewLimited ? '，已按查询窗口截取展示' : '';
   return `${scope}：当前返回 ${returnedFeatureCount.value} / ${totalFeatureCount.value} 个要素${limited}`;
 });
+const mapBoundaries = computed<RegionBoundary[]>(() => {
+  const bboxBoundary = selectedLayerParams.value.bbox
+    ? [createBboxBoundary(selectedLayerParams.value.bbox, activeFocus.value === 'yunnan' ? '云南专题AOI' : '当前查询范围')]
+    : [];
+  return [...bboxBoundary.filter(Boolean) as RegionBoundary[], ...regionBoundaries.value];
+});
+const weatherTarget = computed(() => {
+  const bbox = parseBbox(selectedLayerParams.value.bbox) ?? bboxFromFeatures(selectedLayer.value?.features ?? []);
+  if (bbox) {
+    const [west, south, east, north] = bbox;
+    return {
+      lat: Number(((south + north) / 2).toFixed(4)),
+      lng: Number(((west + east) / 2).toFixed(4)),
+      label: activeFocus.value === 'yunnan' ? '云南专题AOI' : selectedLayerMeta.value?.region ?? '当前AOI'
+    };
+  }
+
+  return {
+    lat: 25.2,
+    lng: 102.7,
+    label: '云南专题AOI'
+  };
+});
+const weatherRiskType = computed(() => {
+  if (weather.value?.risk.level === 'high') return 'danger';
+  if (weather.value?.risk.level === 'medium') return 'warning';
+  return 'success';
+});
 
 async function fetchLayer(layerId = selectedLayerId.value) {
   if (!layerId) {
@@ -241,8 +276,48 @@ async function fetchLayer(layerId = selectedLayerId.value) {
       params: selectedLayerParams.value
     });
     selectedLayer.value = response.data;
+    await fetchWeather();
   } finally {
     layerLoading.value = false;
+  }
+}
+
+async function fetchWeather() {
+  weatherLoading.value = true;
+  try {
+    const target = weatherTarget.value;
+    const response = await api.get<WeatherSnapshot>('/geohazards/weather', {
+      params: {
+        lat: target.lat,
+        lng: target.lng,
+        label: target.label
+      }
+    });
+    weather.value = response.data;
+  } catch {
+    weather.value = null;
+    ElMessage.warning('实时天气暂时不可用，地图仍可查看公开地灾图层。');
+  } finally {
+    weatherLoading.value = false;
+  }
+}
+
+async function fetchRegionBoundaries() {
+  try {
+    const response = await api.get<GeoJsonFeatureCollection>('/geohazards/layers/lhasa-exposure-southwest-core', {
+      params: {
+        limit: 500
+      }
+    });
+    regionBoundaries.value = response.data.features
+      .filter((feature) => feature.geometry?.type === 'Polygon' || feature.geometry?.type === 'MultiPolygon')
+      .map((feature, index) => ({
+        id: `lhasa-region-${feature.properties.objectid ?? index}`,
+        name: String(feature.properties.name_2 ?? feature.properties.admin_name ?? `地区边界 ${index + 1}`),
+        geometry: feature.geometry
+      }));
+  } catch {
+    regionBoundaries.value = [];
   }
 }
 
@@ -288,6 +363,85 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${bytes} B`;
+}
+
+function parseBbox(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parts = value.split(',').map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
+    return null;
+  }
+
+  return parts as [number, number, number, number];
+}
+
+function createBboxBoundary(value: string, name: string): RegionBoundary | null {
+  const bbox = parseBbox(value);
+  if (!bbox) {
+    return null;
+  }
+
+  const [west, south, east, north] = bbox;
+  return {
+    id: `bbox-${value}`,
+    name,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [west, south],
+        [east, south],
+        [east, north],
+        [west, north],
+        [west, south]
+      ]]
+    }
+  };
+}
+
+function bboxFromFeatures(features: GeoJsonFeatureCollection['features']) {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+
+  function visit(value: unknown) {
+    if (!Array.isArray(value)) {
+      return;
+    }
+
+    if (typeof value[0] === 'number' && typeof value[1] === 'number') {
+      west = Math.min(west, value[0]);
+      south = Math.min(south, value[1]);
+      east = Math.max(east, value[0]);
+      north = Math.max(north, value[1]);
+      return;
+    }
+
+    for (const item of value) {
+      visit(item);
+    }
+  }
+
+  for (const feature of features) {
+    visit(feature.geometry?.coordinates);
+  }
+
+  if (![west, south, east, north].every(Number.isFinite)) {
+    return null;
+  }
+
+  return [west, south, east, north] as [number, number, number, number];
+}
+
+function formatWeatherNumber(value: number | null | undefined, suffix: string) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return '-';
+  }
+
+  return `${value}${suffix}`;
 }
 
 function geometryLabel(type: string) {
@@ -551,15 +705,53 @@ onMounted(fetchData);
             v-loading="layerLoading"
             :collection="selectedLayer"
             :layer="selectedLayerMeta"
+            :weather="weather"
+            :boundaries="mapBoundaries"
           />
           <div class="info-strip map-result-strip">
             <div class="info-chip">{{ layerResultNote }}</div>
+            <div v-if="weather" class="info-chip">{{ weather.label }} · 近24h {{ weather.rainfall.last24h }} mm</div>
             <el-tag v-if="selectedLayer?.previewLimited" type="warning">预览截取</el-tag>
           </div>
           <p class="table-note">{{ selectedLayerMeta?.description }}</p>
         </div>
 
         <div>
+          <div class="weather-panel" v-loading="weatherLoading">
+            <div class="weather-panel-head">
+              <div>
+                <span class="section-kicker">live weather</span>
+                <strong>{{ weather?.label ?? '实时天气' }}</strong>
+              </div>
+              <el-tag :type="weatherRiskType">{{ weather?.risk.label ?? '等待数据' }}</el-tag>
+            </div>
+            <div class="weather-metrics">
+              <article>
+                <strong>{{ formatWeatherNumber(weather?.current.temperature, '°C') }}</strong>
+                <span>气温</span>
+              </article>
+              <article>
+                <strong>{{ formatWeatherNumber(weather?.current.relativeHumidity, '%') }}</strong>
+                <span>湿度</span>
+              </article>
+              <article>
+                <strong>{{ formatWeatherNumber(weather?.current.precipitation, ' mm') }}</strong>
+                <span>当前降雨</span>
+              </article>
+              <article>
+                <strong>{{ formatWeatherNumber(weather?.rainfall.last24h, ' mm') }}</strong>
+                <span>近24小时</span>
+              </article>
+            </div>
+            <div class="weather-risk">
+              <span>未来24小时</span>
+              <strong>{{ formatWeatherNumber(weather?.rainfall.next24h, ' mm') }}</strong>
+              <span>最高降雨概率 {{ formatWeatherNumber(weather?.rainfall.next24hProbability, '%') }}</span>
+            </div>
+            <p>{{ weather?.risk.basis ?? '按当前AOI中心点获取实时天气和降雨预报。' }}</p>
+            <el-button plain size="small" :loading="weatherLoading" @click="fetchWeather">刷新天气</el-button>
+          </div>
+
           <el-table :data="geohazard?.layers ?? []" stripe height="360">
             <el-table-column prop="title" label="图层" min-width="210" />
             <el-table-column prop="region" label="区域" width="140" />

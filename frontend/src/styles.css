@@ -768,6 +768,19 @@ select {
   height: 360px;
   margin-top: 14px;
   border: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(215, 225, 228, 0.72) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(215, 225, 228, 0.72) 1px, transparent 1px),
+    #edf4f5;
+  background-size: 48px 48px;
+}
+
+.geohazard-map .leaflet-tile-pane {
+  filter: saturate(0.88) contrast(0.96);
+}
+
+.geohazard-map .leaflet-overlay-pane {
+  filter: drop-shadow(0 2px 4px rgba(20, 35, 43, 0.18));
 }
 
 .geohazard-map-legend {
@@ -794,6 +807,94 @@ select {
   border-radius: 50%;
   border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
   flex: 0 0 auto;
+}
+
+.legend-swatch--weather {
+  background: var(--info);
+  border-color: #ffffff;
+}
+
+.legend-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}
+
+.legend-line {
+  width: 24px;
+  height: 0;
+  border-top: 2px dashed var(--info);
+  flex: 0 0 auto;
+}
+
+.weather-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--info);
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: var(--shadow-soft);
+}
+
+.weather-panel-head,
+.weather-risk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weather-panel-head strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.weather-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weather-metrics article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-muted);
+}
+
+.weather-metrics strong {
+  display: block;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.weather-metrics span,
+.weather-risk span,
+.weather-panel p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.weather-risk {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.weather-risk strong {
+  font-size: 20px;
+}
+
+.weather-panel p {
+  margin: 0;
 }
 
 .map-result-strip {
@@ -1864,6 +1965,16 @@ select {
   .monitoring-source-head,
   .patch-head,
   .patch-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .weather-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .weather-panel-head,
+  .weather-risk {
     align-items: flex-start;
     flex-direction: column;
   }

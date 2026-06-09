@@ -16,6 +16,9 @@ const postgisDatabaseUrl = process.env.POSTGIS_DATABASE_URL?.trim() || process.e
 const sqliteJournalMode = parseSqliteJournalMode(process.env.SQLITE_JOURNAL_MODE);
 const remoteSensingProducts = listFromEnv(process.env.REMOTE_SENSING_PRODUCTS);
 const remoteSensingRegions = listFromEnv(process.env.REMOTE_SENSING_REGIONS);
+const geeTileUrlTemplate = process.env.GEE_TILE_URL_TEMPLATE?.trim();
+const geeLayerTitle = process.env.GEE_LAYER_TITLE?.trim() || 'Google Earth Engine 影像图层';
+const geeAttribution = process.env.GEE_ATTRIBUTION?.trim() || 'Google Earth Engine';
 const unsafeJwtSecrets = new Set([
   fallbackJwtSecret,
   'change-this-to-a-long-random-secret',
@@ -213,5 +216,12 @@ export const appConfig = {
     process.env.REMOTE_SENSING_GIBS_ENDPOINT?.trim() ||
     'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
   remoteSensingProducts,
-  remoteSensingRegions
+  remoteSensingRegions,
+  geeEnabled: booleanFromEnv(process.env.GEE_ENABLED, Boolean(geeTileUrlTemplate)),
+  geeTileUrlTemplate,
+  geeLayerTitle,
+  geeAttribution,
+  geeOpacity: Math.min(Math.max(Number(process.env.GEE_OPACITY ?? 0.72), 0.05), 1),
+  geeMinZoom: integerFromEnv(process.env.GEE_MIN_ZOOM, 3, 0),
+  geeMaxZoom: integerFromEnv(process.env.GEE_MAX_ZOOM, 14, 1)
 };

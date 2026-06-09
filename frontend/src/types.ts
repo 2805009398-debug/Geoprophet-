@@ -379,6 +379,45 @@ export interface RemoteSensingStatus {
   recentAssets: RemoteSensingAsset[];
 }
 
+export interface WeatherSnapshot {
+  provider: string;
+  label: string;
+  lat: number;
+  lng: number;
+  timezone?: string | null;
+  fetchedAt: string;
+  current: {
+    time: string;
+    temperature: number | null;
+    apparentTemperature: number | null;
+    relativeHumidity: number | null;
+    precipitation: number;
+    rain: number | null;
+    weatherCode: number | null;
+    cloudCover: number | null;
+    windSpeed: number | null;
+    windDirection: number | null;
+    windGusts: number | null;
+  };
+  rainfall: {
+    last24h: number;
+    next24h: number;
+    next24hProbability: number | null;
+  };
+  daily: Array<{
+    date: string;
+    precipitationSum: number | null;
+    precipitationProbabilityMax: number | null;
+  }>;
+  risk: {
+    level: 'low' | 'medium' | 'high';
+    score: number;
+    label: string;
+    basis: string;
+  };
+  sourceUrl: string;
+}
+
 export interface MonitoringWorkflowStep {
   key: string;
   title: string;
@@ -490,6 +529,12 @@ export interface GeoJsonFeatureCollection {
     limit?: number | null;
     offset?: number;
   };
+}
+
+export interface RegionBoundary {
+  id: string;
+  name: string;
+  geometry: GeoJsonFeature['geometry'];
 }
 
 export interface LandslideSampleOption {

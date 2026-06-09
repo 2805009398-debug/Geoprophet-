@@ -49,6 +49,11 @@ async function bootstrap() {
     root: runtimePaths.uploadsDir,
     prefix: '/uploads/'
   });
+  await server.register(fastifyStatic, {
+    root: runtimePaths.geohazardsDataDir,
+    prefix: '/remote-sensing-assets/',
+    decorateReply: false
+  });
 
   server.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
