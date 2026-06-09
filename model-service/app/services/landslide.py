@@ -71,23 +71,25 @@ class LandslideService:
     def _predict_with_yolo(self, image: Image.Image) -> dict[str, object]:
         assert self.artifacts.yolo is not None
 
-        results = self.artifacts.yolo.predict(
-            source=image,
-            imgsz=self.settings.landslide_yolo_imgsz,
-            conf=self.settings.landslide_yolo_conf,
-            iou=self.settings.landslide_yolo_iou,
-            max_det=self.settings.landslide_yolo_max_det,
-            device=self._yolo_device_argument(),
-            verbose=False,
-        )
+        results = self._run_yolo_prediction(image, self.settings.landslide_yolo_conf)
         result = results[0]
         image_width, image_height = image.size
+        boxes, scores = self._extract_yolo_boxes(result)
 
-        boxes = np.empty((0, 4), dtype="float32")
-        scores = np.empty((0,), dtype="float32")
-        if result.boxes is not None and len(result.boxes) > 0:
-            boxes = result.boxes.xyxy.detach().cpu().numpy().astype("float32")
-            scores = result.boxes.conf.detach().cpu().numpy().astype("float32")
+        review_mode = False
+        if not len(boxes) and self.settings.landslide_yolo_review_conf < self.settings.landslide_yolo_conf:
+            review_results = self._run_yolo_prediction(image, self.settings.landslide_yolo_review_conf)
+            review_boxes, review_scores = self._extract_yolo_boxes(review_results[0])
+            review_boxes, review_scores = self._filter_large_review_boxes(
+                review_boxes,
+                review_scores,
+                image_width,
+                image_height,
+            )
+            if len(review_boxes):
+                boxes = review_boxes
+                scores = review_scores
+                review_mode = True
 
         regions = self._boxes_to_regions(boxes, scores, image_width, image_height)
         has_landslide = len(regions) > 0
@@ -97,6 +99,8 @@ class LandslideService:
 
         if has_landslide:
             summary = f"检测到 {len(regions)} 处疑似滑坡区域，建议结合现场踏勘进一步复核。"
+            if review_mode:
+                summary = f"低阈值复核检测到 {len(regions)} 处大面积疑似滑坡区域，建议优先人工复核。"
         else:
             summary = "未检出明显滑坡目标，可作为巡查背景样本留存。"
 
@@ -121,12 +125,60 @@ class LandslideService:
                 "maskShape": f"{MASK_SIZE}x{MASK_SIZE}",
                 "detectionCount": len(regions),
                 "detectionThreshold": self.settings.landslide_yolo_conf,
+                "reviewDetectionTriggered": review_mode,
+                "reviewDetectionThreshold": self.settings.landslide_yolo_review_conf,
+                "reviewMinArea": self.settings.landslide_yolo_review_min_area,
                 "iouThreshold": self.settings.landslide_yolo_iou,
                 "imageWidth": image_width,
                 "imageHeight": image_height,
             },
             "warning": self.artifacts.warning,
         }
+
+    def _run_yolo_prediction(self, image: Image.Image, conf: float) -> Any:
+        assert self.artifacts.yolo is not None
+
+        return self.artifacts.yolo.predict(
+            source=image,
+            imgsz=self.settings.landslide_yolo_imgsz,
+            conf=conf,
+            iou=self.settings.landslide_yolo_iou,
+            max_det=self.settings.landslide_yolo_max_det,
+            device=self._yolo_device_argument(),
+            verbose=False,
+        )
+
+    @staticmethod
+    def _extract_yolo_boxes(result: Any) -> tuple[np.ndarray, np.ndarray]:
+        boxes = np.empty((0, 4), dtype="float32")
+        scores = np.empty((0,), dtype="float32")
+        if result.boxes is not None and len(result.boxes) > 0:
+            boxes = result.boxes.xyxy.detach().cpu().numpy().astype("float32")
+            scores = result.boxes.conf.detach().cpu().numpy().astype("float32")
+        return boxes, scores
+
+    def _filter_large_review_boxes(
+        self,
+        boxes: np.ndarray,
+        scores: np.ndarray,
+        image_width: int,
+        image_height: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if not len(boxes):
+            return boxes, scores
+
+        image_area = max(image_width * image_height, 1)
+        keep_indices: list[int] = []
+        for index, box in enumerate(boxes):
+            x_min, y_min, x_max, y_max = [float(value) for value in box]
+            box_area = max(0.0, x_max - x_min) * max(0.0, y_max - y_min)
+            if box_area / image_area >= self.settings.landslide_yolo_review_min_area:
+                keep_indices.append(index)
+
+        if not keep_indices:
+            return np.empty((0, 4), dtype="float32"), np.empty((0,), dtype="float32")
+
+        return boxes[keep_indices], scores[keep_indices]
 
     def _predict_with_legacy_models(self, image: Image.Image) -> dict[str, object]:
         assert self.artifacts.classifier is not None

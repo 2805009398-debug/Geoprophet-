@@ -6,6 +6,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$userArkApiKey = [Environment]::GetEnvironmentVariable("ARK_API_KEY", "User")
+$userVisionApiKey = [Environment]::GetEnvironmentVariable("VISION_API_KEY", "User")
+$userDoubaoApiKey = [Environment]::GetEnvironmentVariable("DOUBAO_API_KEY", "User")
+
+if (-not $env:ARK_API_KEY -and $userArkApiKey) {
+  $env:ARK_API_KEY = $userArkApiKey
+}
+
+if (-not $env:VISION_API_KEY -and $userVisionApiKey) {
+  $env:VISION_API_KEY = $userVisionApiKey
+}
+
+if (-not $env:DOUBAO_API_KEY -and $userDoubaoApiKey) {
+  $env:DOUBAO_API_KEY = $userDoubaoApiKey
+}
+
 if (-not $env:ARK_API_KEY -and -not $env:VISION_API_KEY -and -not $env:DOUBAO_API_KEY) {
   Write-Host "Please set ARK_API_KEY in the current PowerShell session first, for example:"
   Write-Host '$env:ARK_API_KEY="your Volcengine Ark API key"'

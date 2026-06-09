@@ -197,7 +197,7 @@ export const appConfig = {
   visionBaseUrl,
   visionModel,
   visionChatEndpoint,
-  visionTimeoutMs: numberFromEnv(process.env.VISION_TIMEOUT_MS, 45_000),
+  visionTimeoutMs: numberFromEnv(process.env.VISION_TIMEOUT_MS, 90_000),
   postgisDatabaseUrl,
   geohazardsPreferPostgis: booleanFromEnv(process.env.GEOHAZARDS_PREFER_POSTGIS, Boolean(postgisDatabaseUrl)),
   postgisConnectionTimeoutMs: numberFromEnv(process.env.POSTGIS_CONNECTION_TIMEOUT_MS, 2_000),

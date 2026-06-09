@@ -13,6 +13,8 @@ class Settings:
     allow_heuristic_fallback: bool
     landslide_yolo_path: Path
     landslide_yolo_conf: float
+    landslide_yolo_review_conf: float
+    landslide_yolo_review_min_area: float
     landslide_yolo_iou: float
     landslide_yolo_imgsz: int
     landslide_yolo_max_det: int
@@ -40,6 +42,8 @@ def get_settings() -> Settings:
         allow_heuristic_fallback=_to_bool(os.getenv("ALLOW_HEURISTIC_FALLBACK"), False),
         landslide_yolo_path=Path(os.getenv("LANDSLIDE_YOLO_PATH", default_yolo_path)),
         landslide_yolo_conf=float(os.getenv("LANDSLIDE_YOLO_CONF", "0.25")),
+        landslide_yolo_review_conf=float(os.getenv("LANDSLIDE_YOLO_REVIEW_CONF", "0.05")),
+        landslide_yolo_review_min_area=float(os.getenv("LANDSLIDE_YOLO_REVIEW_MIN_AREA", "0.08")),
         landslide_yolo_iou=float(os.getenv("LANDSLIDE_YOLO_IOU", "0.45")),
         landslide_yolo_imgsz=int(os.getenv("LANDSLIDE_YOLO_IMGSZ", "640")),
         landslide_yolo_max_det=int(os.getenv("LANDSLIDE_YOLO_MAX_DET", "300")),

@@ -10,7 +10,7 @@ export const api = axios.create({
 
 export const analysisApi = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 45000
+  timeout: 120000
 });
 
 function attachAuthToken(config: InternalAxiosRequestConfig) {

@@ -95,7 +95,26 @@ export async function analyzeSavedReportImageUpload(
   taskType: TaskType,
   savedUpload: SavedUpload
 ) {
-  if (fastify.appConfig.visionProvider !== 'disabled' && fastify.appConfig.visionProvider !== 'deepseek') {
+  const visionEnabled = fastify.appConfig.visionProvider !== 'disabled' && fastify.appConfig.visionProvider !== 'deepseek';
+
+  if (visionEnabled && fastify.appConfig.aiInferenceBaseUrl) {
+    const results = await Promise.allSettled([
+      runVisionPrediction(fastify, taskType, savedUpload),
+      runExternalPrediction(fastify, taskType, savedUpload)
+    ]);
+    const predictions = results
+      .filter((result): result is PromiseFulfilledResult<HazardPrediction> => result.status === 'fulfilled')
+      .map((result) => result.value);
+
+    if (predictions.length) {
+      return persistPrediction(fastify, mergeImageReviewPredictions(predictions));
+    }
+
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    throw failed?.reason ?? upstreamFailure('图片初审服务不可用，请稍后重试。');
+  }
+
+  if (visionEnabled) {
     const prediction = await runVisionPrediction(fastify, taskType, savedUpload);
     return persistPrediction(fastify, prediction);
   }
@@ -291,6 +310,7 @@ function buildVisionPrompt() {
   return [
     '你是地质灾害移动巡查图片初审助手。请只根据图片可见内容判断是否存在滑坡、崩塌、泥石流、坡体失稳或明显灾害风险迹象。',
     '重点识别滑坡预警前兆：坡体后部弧形裂缝，中部或前部放射状、横向裂缝，裂缝明显加宽加长；坡脚土体上隆、鼓包、挤压变形；坡体四周松弛、零星碎石掉落、小型崩塌；树木倾斜、醉汉林、马刀树，房屋或挡墙裂缝拉张。',
+    '如果图片中出现大面积新鲜浅色裸土或裸岩、陡直滑坡壁、沟槽状主滑道、坡脚扇形堆积体、植被被切断或明显破坏边界，应优先视为滑坡或崩塌视觉证据；即使没有清晰裂缝，也不要判为常规留存。',
     '如果图片能清楚看到渗水、浑浊水流、水位突变痕迹、池塘漏失或新鲜湿痕，也可作为地下水异常线索；但不要仅凭普通水体、阴影或植被推断地下水异常。',
     '微小声响、动物惊恐不安等属于现场描述前兆，静态图片通常无法判断；除非图片中有明确可见证据，否则不要把它们当作视觉证据。',
     '请输出严格 JSON，不要输出 Markdown、代码块或解释性前后缀。',
@@ -310,7 +330,7 @@ function buildVisionPrompt() {
     '}',
     'riskScore 使用 0 到 1 的小数，riskLevel 根据图像可见风险分为 low、medium、high、critical。',
     '坐标使用 0 到 1 的相对比例，x 从左到右，y 从上到下；如果无法可靠定位区域，regions 返回空数组。',
-    'warningSigns 只填写图片中可见且与滑坡前兆相关的短语，例如“坡体后缘弧形裂缝”“坡脚隆起”“树木倾斜”“零星落石”。',
+    'warningSigns 只填写图片中可见且与滑坡前兆相关的短语，例如“坡体后缘弧形裂缝”“陡直滑坡壁”“主滑道”“坡脚堆积体”“树木倾斜”“零星落石”。',
     '不要把普通山体、道路、植被、水面或阴影误判为灾害；证据不足时 hasHazard=false，并说明需要人工复核。'
   ].join('\n');
 }
@@ -394,13 +414,25 @@ function normalizeVisionPrediction(
   savedUpload: SavedUpload,
   payload: Record<string, unknown>
 ): HazardPrediction {
-  const hasHazard = Boolean(payload.hasHazard ?? payload.has_landslide ?? payload.hasLandslide ?? false);
-  const confidence = clamp(Number(payload.confidence ?? payload.score ?? (hasHazard ? 0.75 : 0.35)), 0, 1);
-  const hazardType = toNonEmptyString(payload.hazardType) ?? (hasHazard ? 'landslide' : 'none');
-  const regions = normalizeVisionRegions(payload.regions, hasHazard ? '疑似地灾区域' : '地灾区域');
   const warningSigns = normalizeStringList(payload.warningSigns ?? payload.warning_signs).slice(0, 6);
   const observations = normalizeStringList(payload.observations).slice(0, 6);
   const evidence = normalizeStringList(payload.evidence).slice(0, 6);
+  const rawSummary = toNonEmptyString(payload.summary);
+  const declaredHasHazard = Boolean(payload.hasHazard ?? payload.has_landslide ?? payload.hasLandslide ?? false);
+  const textHazardCue = !declaredHasHazard && containsVisualHazardCue([
+    rawSummary,
+    ...warningSigns,
+    ...observations,
+    ...evidence
+  ]);
+  const hasHazard = declaredHasHazard || textHazardCue;
+  const confidence = clamp(
+    Number(payload.confidence ?? payload.score ?? (hasHazard ? 0.75 : 0.35)),
+    0,
+    1
+  );
+  const hazardType = toNonEmptyString(payload.hazardType) ?? (hasHazard ? 'landslide' : 'none');
+  const regions = normalizeVisionRegions(payload.regions, hasHazard ? '疑似地灾区域' : '地灾区域');
   const recommendedAction = toNonEmptyString(payload.recommendedAction);
   const providerName = fastify.appConfig.visionProvider === 'doubao' ? 'doubao' : 'openai-compatible';
   const riskAssessment = buildRiskAssessment({
@@ -423,7 +455,7 @@ function normalizeVisionPrediction(
     sourceUrl: savedUpload.publicUrl,
     createdAt: toSqlTimestamp(new Date()),
     summary:
-      toNonEmptyString(payload.summary) ??
+      rawSummary ??
       (hasHazard ? '视觉大模型判定图片存在疑似地质灾害迹象。' : '视觉大模型未发现明确地质灾害迹象。'),
     confidence,
     riskAssessment,
@@ -440,6 +472,7 @@ function normalizeVisionPrediction(
       visionProvider: providerName,
       hazardType,
       warningSigns: warningSigns.join('；') || null,
+      textHazardCue,
       reviewSuggested: riskAssessment.reviewRequired,
       observations: observations.join('；') || null,
       recommendedAction: riskAssessment.recommendedAction
@@ -625,17 +658,31 @@ function normalizePolygon(value: unknown): Point[] {
     return [];
   }
 
-  return value
+  const rawPoints = value
     .map((point) => {
       if (!point || typeof point !== 'object') {
         return null;
       }
 
-      const x = clamp(Number((point as Record<string, unknown>).x ?? 0), 0, 1);
-      const y = clamp(Number((point as Record<string, unknown>).y ?? 0), 0, 1);
+      const x = Number((point as Record<string, unknown>).x ?? 0);
+      const y = Number((point as Record<string, unknown>).y ?? 0);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+      }
+
       return { x, y };
     })
     .filter((point): point is Point => point !== null);
+
+  if (!rawPoints.length) {
+    return [];
+  }
+
+  const usesPercentCoordinates = rawPoints.some((point) => point.x > 1 || point.y > 1);
+  return rawPoints.map((point) => ({
+    x: clamp(usesPercentCoordinates ? point.x / 100 : point.x, 0, 1),
+    y: clamp(usesPercentCoordinates ? point.y / 100 : point.y, 0, 1)
+  }));
 }
 
 function maskToRegion(maskValue: unknown, label: string): SegmentationRegion | null {
@@ -730,19 +777,41 @@ function buildRiskAssessment(input: {
   providedRiskLevel?: RiskLevel | null;
   providedRiskScore?: number | null;
 }): RiskAssessment {
-  const visualEvidence = [
+  const bestRegionScore = input.regions.reduce((max, region) => Math.max(max, region.score), 0);
+  const bestRegionArea = input.regions.reduce((max, region) => Math.max(max, polygonArea(region.polygon)), 0);
+  let visualEvidence = [
     ...(input.evidence ?? []),
     ...(input.observations ?? []),
     ...input.regions.map((region) => `${region.label}，区域置信度 ${Math.round(region.score * 100)}%`)
-  ].filter(Boolean).slice(0, 6);
+  ].filter(Boolean);
+
+  if (input.hasHazard && bestRegionArea >= 0.08) {
+    visualEvidence.push(`疑似区域覆盖图像约 ${Math.round(bestRegionArea * 100)}%`);
+  }
+
+  visualEvidence = visualEvidence.slice(0, 6);
 
   if (!visualEvidence.length) {
     visualEvidence.push(input.hasHazard ? '模型检出疑似地灾视觉特征' : '图像中未检出明确地灾视觉特征');
   }
 
-  const bestRegionScore = input.regions.reduce((max, region) => Math.max(max, region.score), 0);
+  const largeRegionBoost = input.hasHazard ? clamp(bestRegionArea * 0.25, 0, 0.16) : 0;
+  const lowConfidenceLargeRegionBoost = input.hasHazard && bestRegionArea >= 0.18 && bestRegionScore < 0.45 ? 0.05 : 0;
+  const largeRegionRiskFloor = input.hasHazard && bestRegionArea >= 0.18 ? 0.7 : input.hasHazard && bestRegionArea >= 0.08 ? 0.62 : 0;
   const computedScore = input.hasHazard
-    ? clamp(0.42 + input.confidence * 0.38 + bestRegionScore * 0.12 + Math.min(visualEvidence.length, 3) * 0.03, 0, 1)
+    ? clamp(
+        Math.max(
+          largeRegionRiskFloor,
+          0.42 +
+            input.confidence * 0.38 +
+            bestRegionScore * 0.12 +
+            Math.min(visualEvidence.length, 3) * 0.03 +
+            largeRegionBoost +
+            lowConfidenceLargeRegionBoost
+        ),
+        0,
+        1
+      )
     : clamp((1 - input.confidence) * 0.34 + (input.confidence < 0.65 ? 0.12 : 0), 0, 0.45);
   const riskScore = clamp(input.providedRiskScore ?? computedScore, 0, 1);
   const riskLevel = input.providedRiskLevel ?? riskLevelFromScore(riskScore);
@@ -760,6 +829,105 @@ function buildRiskAssessment(input: {
       ? `基于图像中的${hazardTypeLabel(input.hazardType)}视觉特征、模型置信度和疑似区域位置进行初筛研判。`
       : '基于图像可见内容未检出明确地灾迹象；若现场处于雨后、陡坡或历史隐患点附近，仍建议结合多源数据复核。'
   };
+}
+
+function mergeImageReviewPredictions(predictions: HazardPrediction[]): HazardPrediction {
+  const [primary, ...secondary] = [...predictions].sort(comparePredictionRisk);
+  if (!primary || !secondary.length) {
+    return primary ?? predictions[0];
+  }
+
+  const riskScore = Math.max(...predictions.map((prediction) => prediction.riskAssessment.riskScore));
+  const scoreRiskLevel = riskLevelFromScore(riskScore);
+  const riskLevel = riskRank(scoreRiskLevel) > riskRank(primary.riskAssessment.riskLevel)
+    ? scoreRiskLevel
+    : primary.riskAssessment.riskLevel;
+  const reviewRequired = predictions.some((prediction) => prediction.riskAssessment.reviewRequired);
+  const evidence = uniqueStrings(predictions.flatMap((prediction) => prediction.riskAssessment.evidence)).slice(0, 8);
+  const providerNames = uniqueStrings(predictions.map((prediction) => prediction.provider));
+  const modelNames = uniqueStrings(predictions.map((prediction) => prediction.modelName));
+  const visionProvider =
+    typeof primary.metadata.visionProvider === 'string' && primary.metadata.visionProvider
+      ? primary.metadata.visionProvider
+      : providerNames.join('+');
+  const crossCheckSummary = secondary
+    .map((prediction) => `${prediction.modelName}：${prediction.riskAssessment.label}`)
+    .join('；');
+
+  return {
+    ...primary,
+    confidence: primary.confidence,
+    summary: crossCheckSummary ? `${primary.summary} 交叉校验：${crossCheckSummary}。` : primary.summary,
+    riskAssessment: {
+      ...primary.riskAssessment,
+      riskLevel,
+      riskScore,
+      label: riskLevelLabel(riskLevel),
+      evidence,
+      reviewRequired,
+      basis: '融合视觉大模型和本地滑坡检测结果，按较高风险结论进入图片预警初审。'
+    },
+    metadata: {
+      ...primary.metadata,
+      visionProvider,
+      crossCheckProviders: providerNames.join('+'),
+      crossCheckModels: modelNames.join('+'),
+      crossCheckRiskLevels: predictions.map((prediction) => prediction.riskAssessment.riskLevel).join('+'),
+      crossCheckReviewRequired: reviewRequired
+    }
+  };
+}
+
+function comparePredictionRisk(left: HazardPrediction, right: HazardPrediction) {
+  const levelDelta = riskRank(right.riskAssessment.riskLevel) - riskRank(left.riskAssessment.riskLevel);
+  if (levelDelta !== 0) {
+    return levelDelta;
+  }
+
+  const scoreDelta = right.riskAssessment.riskScore - left.riskAssessment.riskScore;
+  if (scoreDelta !== 0) {
+    return scoreDelta;
+  }
+
+  return right.confidence - left.confidence;
+}
+
+function riskRank(level: RiskLevel) {
+  const ranks: Record<RiskLevel, number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+    critical: 3
+  };
+  return ranks[level];
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function containsVisualHazardCue(values: Array<string | null | undefined>) {
+  const text = values.filter(Boolean).join(' ').replace(/\s+/g, '');
+  if (!text) {
+    return false;
+  }
+
+  return /滑坡壁|主滑道|滑坡体|堆积体|堆积扇|坡脚堆积|裸露坡面|新鲜裸土|浅色裸土|裸岩|崩塌壁|坡体失稳|植被破坏|冲沟|落石|碎石堆/.test(text);
+}
+
+function polygonArea(polygon: Point[]) {
+  if (polygon.length < 3) {
+    return 0;
+  }
+
+  let area = 0;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index];
+    const next = polygon[(index + 1) % polygon.length];
+    area += current.x * next.y - next.x * current.y;
+  }
+
+  return Math.abs(area) / 2;
 }
 
 function normalizeRiskLevel(value: unknown): RiskLevel | null {
